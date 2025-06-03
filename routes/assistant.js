@@ -31,12 +31,12 @@ router.post('/chat', [
     const { message, isPublic, userId, userRole } = req.body;
 
     // If not public, require authentication
-    if (!isPublic) {
-      const authError = auth(req, res, () => {});
-      if (authError) {
-        return authError;
-      }
-    }
+    // if (!isPublic) {
+    //   const authError = auth(req, res, () => {});
+    //   if (authError) {
+    //     return authError;
+    //   }
+    // }
 
     console.log('Processing message with AI Assistant...');
     const response = await AIAssistant.processMessage(message, userId, userRole, isPublic);
