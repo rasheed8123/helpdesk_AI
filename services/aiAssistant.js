@@ -1,15 +1,12 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
-const fs = require('fs').promises;
-const path = require('path');
-const pdfParse = require('pdf-parse');
+const ragService = require('./ragService');
 
 // Initialize Google Generative AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// PDF file path - corrected to point to the root server directory
-const PDF_PATH = path.join(__dirname, '..', 'data', 'pdfs', 'helpdesk_guide.pdf');
+// RAG service will handle PDF processing and retrieval
 
 class AIAssistant {
   static async processMessage(message, userId = null, userRole = null, isPublic = false) {
@@ -63,21 +60,19 @@ class AIAssistant {
         };
       }
 
-      // Get PDF content
-      let pdfContent = '';
+      // Get relevant PDF content using RAG
+      let relevantContent = '';
       try {
-        console.log('Attempting to read PDF from:', PDF_PATH);
-        const pdfBuffer = await fs.readFile(PDF_PATH);
-        const pdfData = await pdfParse(pdfBuffer);
-        pdfContent = pdfData.text;
-        console.log('Successfully read PDF content');
+        console.log('Retrieving relevant content using RAG...');
+        relevantContent = await ragService.getRelevantSections(message, 3);
+        console.log('Successfully retrieved relevant content');
       } catch (error) {
-        console.error('Error reading PDF:', error);
-        pdfContent = 'PDF content not available';
+        console.error('Error retrieving relevant content:', error);
+        relevantContent = 'Relevant content not available';
       }
 
-      // Add PDF content to context
-      context.pdfContent = pdfContent;
+      // Add relevant content to context
+      context.relevantContent = relevantContent;
 
       // Generate response using the model
       const response = await this.generateResponseWithGemini(message, context, isPublic);
@@ -132,8 +127,8 @@ class AIAssistant {
   static buildPrompt(message, context, isPublic) {
     let prompt = `You are a concise AI assistant for a helpdesk system. Provide a brief response (2-3 sentences) using the following context:
 
-Helpdesk Guide Content:
-${context.pdfContent}
+Relevant Helpdesk Guide Content:
+${context.relevantContent}
 
 User Message: ${message}
 
@@ -171,8 +166,8 @@ ${context.recentActivity.map(activity => `
 - ${activity.title} (${activity.status}) - Updated: ${new Date(activity.updatedAt).toLocaleDateString()}
 `).join('\n')}
 
-Helpdesk Guide Content:
-${context.pdfContent}
+Relevant Helpdesk Guide Content:
+${context.relevantContent}
 
 User Message: ${message}
 

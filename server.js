@@ -12,6 +12,7 @@ const ticketRoutes = require('./routes/tickets');
 const adminRoutes = require('./routes/admin');
 const assistantRoutes = require('./routes/assistant');
 const translationRoutes = require('./routes/translationRoutes');
+const { initializeRAG } = require('./scripts/initRAG');
 
 const app = express();
 
@@ -78,7 +79,22 @@ app.use('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+
+// Initialize RAG service before starting the server
+async function startServer() {
+  try {
+    console.log('🔄 Initializing RAG service...');
+    await initializeRAG();
+    console.log('✅ RAG service initialized successfully');
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to initialize RAG service:', error);
+    process.exit(1);
+  }
+}
+
+startServer();

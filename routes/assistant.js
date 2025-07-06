@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { auth } = require('../middleware/auth');
 const AIAssistant = require('../services/aiAssistant');
+const ragService = require('../services/ragService');
 
 const router = express.Router();
 
@@ -96,6 +97,53 @@ router.post('/summarize-ticket', auth, async (req, res) => {
     console.error('Error in summarize-ticket endpoint:', error);
     res.status(500).json({ 
       error: 'Failed to generate summary',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Test RAG system endpoint
+router.get('/test-rag', async (req, res) => {
+  try {
+    const { query } = req.query;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query parameter is required' });
+    }
+
+    console.log('Testing RAG system with query:', query);
+    
+    // Test the RAG system
+    const relevantContent = await ragService.getRelevantSections(query, 2);
+    
+    res.json({
+      query,
+      relevantContent,
+      message: 'RAG system test completed successfully'
+    });
+  } catch (error) {
+    console.error('RAG test error:', error);
+    res.status(500).json({ 
+      error: 'Failed to test RAG system',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Refresh RAG system endpoint
+router.post('/refresh-rag', auth, async (req, res) => {
+  try {
+    console.log('Refreshing RAG system...');
+    
+    await ragService.refreshVectorStore();
+    
+    res.json({
+      message: 'RAG system refreshed successfully'
+    });
+  } catch (error) {
+    console.error('RAG refresh error:', error);
+    res.status(500).json({ 
+      error: 'Failed to refresh RAG system',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
