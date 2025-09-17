@@ -86,15 +86,14 @@ async function startServer() {
     console.log('🔄 Initializing RAG service...');
     await initializeRAG();
     console.log('✅ RAG service initialized successfully');
-    
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-    });
   } catch (error) {
-    console.error('❌ Failed to initialize RAG service:', error);
-    process.exit(1);
+    console.error('⚠️ RAG initialization failed. Continuing to start server in degraded mode.', error);
   }
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
 }
 
 startServer();

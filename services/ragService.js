@@ -10,6 +10,9 @@ class RAGService {
     this.documentChunks = [];
     this.chunkEmbeddings = [];
     this.isInitialized = false;
+    this.safeMode = false; // When true, degrade gracefully and avoid external calls
+    this.maxChunks = parseInt(process.env.RAG_MAX_CHUNKS || '200', 10);
+    this.embedOnStart = (process.env.RAG_EMBED_ON_START || 'true').toLowerCase() === 'true';
     this.PDF_PATH = path.join(__dirname, '..', 'data', 'pdfs', 'helpdesk_guide.pdf');
   }
 
@@ -23,13 +26,19 @@ class RAGService {
       });
 
       // Load and process PDF
-      await this.loadAndProcessPDF();
+      if (this.embedOnStart) {
+        await this.loadAndProcessPDF();
+      } else {
+        console.log('RAG_EMBED_ON_START=false, skipping embedding generation at startup');
+      }
       
       this.isInitialized = true;
       console.log('RAG Service initialized successfully');
     } catch (error) {
       console.error('Error initializing RAG Service:', error);
-      throw error;
+      this.safeMode = true;
+      this.isInitialized = true; // Allow server to boot; RAG will return empty context
+      console.warn('RAG Service entered SAFE MODE. Retrieval will return empty context until refreshed.');
     }
   }
 
@@ -90,8 +99,13 @@ class RAGService {
   async generateChunkEmbeddings() {
     try {
       this.chunkEmbeddings = [];
-      
-      for (let i = 0; i < this.documentChunks.length; i++) {
+
+      const limit = Math.min(this.documentChunks.length, this.maxChunks);
+      if (limit < this.documentChunks.length) {
+        console.log(`Limiting embeddings to first ${limit} chunks due to RAG_MAX_CHUNKS=${this.maxChunks}`);
+      }
+
+      for (let i = 0; i < limit; i++) {
         const chunk = this.documentChunks[i];
         const embedding = await this.getEmbedding(chunk);
         this.chunkEmbeddings.push({
@@ -102,7 +116,7 @@ class RAGService {
         
         // Log progress every 10 chunks
         if ((i + 1) % 10 === 0) {
-          console.log(`Generated embeddings for ${i + 1}/${this.documentChunks.length} chunks`);
+          console.log(`Generated embeddings for ${i + 1}/${limit} chunks`);
         }
       }
       
@@ -115,12 +129,42 @@ class RAGService {
 
   async getEmbedding(text) {
     try {
-      const result = await this.embeddings.embedContent(text);
-      const embedding = result.embedding;
-      return embedding.values;
+      return await this.retryWithBackoff(async () => {
+        const result = await this.embeddings.embedContent(text);
+        const embedding = result.embedding;
+        return embedding.values;
+      });
     } catch (error) {
       console.error('Error getting embedding:', error);
       throw error;
+    }
+  }
+
+  async retryWithBackoff(fn, options = {}) {
+    const {
+      retries = parseInt(process.env.RAG_RETRY_ATTEMPTS || '3', 10),
+      baseDelayMs = parseInt(process.env.RAG_RETRY_BASE_DELAY_MS || '500', 10),
+      maxDelayMs = parseInt(process.env.RAG_RETRY_MAX_DELAY_MS || '4000', 10),
+    } = options;
+
+    let attempt = 0;
+    while (true) {
+      try {
+        return await fn();
+      } catch (err) {
+        const status = err && (err.status || err.statusCode);
+        const isQuota = status === 429;
+        const isRetryable = isQuota || (status >= 500 && status < 600);
+
+        if (attempt >= retries || !isRetryable) {
+          throw err;
+        }
+
+        const delay = Math.min(baseDelayMs * Math.pow(2, attempt), maxDelayMs);
+        console.warn(`Retrying (${attempt + 1}/${retries}) after ${delay}ms due to error status ${status || 'unknown'}`);
+        await new Promise(res => setTimeout(res, delay));
+        attempt += 1;
+      }
     }
   }
 
@@ -153,6 +197,10 @@ class RAGService {
     try {
       if (!this.isInitialized) {
         await this.initialize();
+      }
+
+      if (this.safeMode || !this.chunkEmbeddings.length) {
+        return '';
       }
 
       console.log(`Searching for relevant context for query: "${query}"`);
@@ -193,6 +241,10 @@ class RAGService {
         await this.initialize();
       }
 
+      if (this.safeMode) {
+        return '';
+      }
+
       // Extract key terms from user message for better search
       const searchQuery = this.extractSearchTerms(userMessage);
       
@@ -220,6 +272,7 @@ class RAGService {
     try {
       console.log('Refreshing RAG service...');
       this.isInitialized = false;
+      this.safeMode = false;
       this.documentChunks = [];
       this.chunkEmbeddings = [];
       await this.loadAndProcessPDF();
